@@ -4,13 +4,8 @@
     "notes":"You can use it with scooptools for chinese region", 
     "homepage": "https://github.com/BBDXF/scoopex",
     "license": "MIT",
-    "url": "https://raw.githubusercontent.com/BBDXF/scoopex/refs/tags/v1.1/bin/scoopex.ps1",
-    "hash": "2801fdd6020f78f8adbc3e326aa9d8954b5a7383762ad48212be3351c10ff951",
+    "url": "https://raw.githubusercontent.com/BBDXF/scoopex/refs/heads/main/bin/scoopex.ps1",
     "bin": [
         "scoopex.ps1"
-    ],
-    "checkver": "github",
-    "autoupdate": {
-        "url": "https://raw.githubusercontent.com/BBDXF/scoopex/refs/tags/v$version/bin/scoopex.ps1"
-    }
+    ]
 }

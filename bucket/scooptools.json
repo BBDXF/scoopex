@@ -4,7 +4,6 @@
     "homepage": "https://github.com/BBDXF/ScoopTools",
     "license": "MIT",
     "url": "https://github.com/BBDXF/ScoopTools/releases/download/v1.3.0.0/ScoopTools-v1.3.0.0.7z",
-    "hash": "e01c963da8eab8a74feec35192d5bf2ef82da24bb57e016d8af778ae86da43e8",
     "extract_dir": "ScoopTools"
     "bin": [
         "ScoopTools.exe"
