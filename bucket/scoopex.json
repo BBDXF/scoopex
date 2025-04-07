@@ -1,0 +1,22 @@
+{
+    "version": "1.0",
+    "description": "A enhanced script for scoop, add online app search, url clean mirror, scoop github proxy, bucket modify... functions.",
+    "notes":"You can use it with scooptools for chinese region", 
+    "homepage": "https://github.com/BBDXF/scoopex",
+    "license": "MIT",
+    "url": "https://raw.githubusercontent.com/BBDXF/scoopex/refs/tags/v1.0/bin/scoopex.ps1",
+    "hash": "2801fdd6020f78f8adbc3e326aa9d8954b5a7383762ad48212be3351c10ff951",
+    "bin": [
+        "ScoopTools.exe"
+    ],
+    "shortcuts": [
+        [
+            "ScoopTools.exe"
+            "ScoopTools"
+        ]
+    ], 
+    "checkver": "github",
+    "autoupdate": {
+        "url": "https://raw.githubusercontent.com/BBDXF/scoopex/refs/tags/v$version/bin/scoopex.ps1"
+    }
+}

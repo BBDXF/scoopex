@@ -1,0 +1,22 @@
+{
+    "version": "1.3.0.0",
+    "description": "C# Form 开发的GUI程序，为方便国内环境安装和维护scoop，bucket, app 的小工具",
+    "homepage": "https://github.com/BBDXF/ScoopTools",
+    "license": "MIT",
+    "url": "https://github.com/BBDXF/ScoopTools/releases/download/v1.3.0.0/ScoopTools-v1.3.0.0.7z",
+    "hash": "e01c963da8eab8a74feec35192d5bf2ef82da24bb57e016d8af778ae86da43e8",
+    "extract_dir": "ScoopTools"
+    "bin": [
+        "ScoopTools.exe"
+    ],
+    "shortcuts": [
+        [
+            "ScoopTools.exe"
+            "ScoopTools"
+        ]
+    ], 
+    "checkver": "github",
+    "autoupdate": {
+        "url": "https://github.com/BBDXF/ScoopTools/releases/download/v$version/ScoopTools-v$version.7z"
+    }
+}
