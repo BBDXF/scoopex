@@ -651,10 +651,6 @@ if ($null -eq $clean) {
 }
 # Write-Host "[scoopex] Url Clean Mode: $clean"
 
-# pre-action variables
-$pre_json_content = ""
-
-
 # init
 if($args[0] -eq 'init') {
     # default config for scoopex
@@ -794,6 +790,76 @@ function Set-BucketAppUrlByConfig(){
     return $old_content
 }
 
+function Get-GitRepoUrl {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+    # cd to the directory
+    Push-Location $Path
+    try {
+        # git config --get remote.origin.url
+        $remoteUrl = git config --get remote.origin.url
+        if ($remoteUrl) {
+            return $remoteUrl
+        }
+    }
+    finally {
+        # back to the original directory
+        Pop-Location
+    }
+    return $null
+}
+
+function Set-GitRepoUrl {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$Url
+    )
+    # cd to the directory
+    Push-Location $Path
+    try {
+        # git remote set-url origin <url>
+        git remote set-url origin $Url
+        return $true
+    }
+    finally {
+        # back to the original directory
+        Pop-Location
+    }
+    return $false
+}
+
+function Set-GitRepoReset{
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Path 
+    )
+    # cd to the directory
+    Push-Location $Path
+    try {
+        # git remote set-url origin <url>
+        git reset --hard
+    }
+    finally {
+        # back to the original directory
+        Pop-Location
+    }
+}
+
+function Reset-BucketsChanges {
+    
+    $buckets_dir = "$scoopdir/buckets/"
+    foreach($bucket in (Get-ChildItem $buckets_dir -Directory)) {
+        if($bucket.Name -in @("online", "tmp") ){
+            continue 
+        }
+       Set-GitRepoReset $bucket.FullName 
+    }    
+}
+
 # install/download/update
 if ($args[0] -eq 'install' -OR $args[0] -eq 'download') {
     if ( $args.Count -ne 2) {
@@ -868,6 +934,7 @@ if ($args[0] -eq 'install' -OR $args[0] -eq 'download') {
     }
 
     # modify bucket/xxx.json url
+    $pre_json_content = ""
     if ($null -ne $app_bucket -AND $app_bucket -ne "") {
         $pre_json_content = Set-BucketAppUrlByConfig $app_bucket_file
     }
@@ -1037,48 +1104,6 @@ if ($args[0] -eq 'fix-bucket') {
     exit 0
 }
 
-function Get-GitRepoUrl {
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$Path
-    )
-    # cd to the directory
-    Push-Location $Path
-    try {
-        # git config --get remote.origin.url
-        $remoteUrl = git config --get remote.origin.url
-        if ($remoteUrl) {
-            return $remoteUrl
-        }
-    }
-    finally {
-        # back to the original directory
-        Pop-Location
-    }
-    return $null
-}
-
-function Set-GitRepoUrl {
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$Path,
-        [Parameter(Mandatory = $true)]
-        [string]$Url
-    )
-    # cd to the directory
-    Push-Location $Path
-    try {
-        # git remote set-url origin <url>
-        git remote set-url origin $Url
-        return $true
-    }
-    finally {
-        # back to the original directory
-        Pop-Location
-    }
-    return $false
-}
-
 # mirr-bucket <bucket> <true/false/url>
 if ($args[0] -eq 'mirr-bucket') {
     if ( $args.Count -eq 1) {
@@ -1105,6 +1130,14 @@ if ($args[0] -eq 'mirr-bucket') {
     $buckets = @()
     if($bucket -eq "*" -OR $bucket -eq "all") {
         $buckets = Get-ChildItem "$scoopdir/buckets/" -Directory | ForEach-Object { $_.Name }
+        if($val -eq "true" -AND $mirror -ne ""){
+            # change scoop_repo url
+            $null = set_config 'scoop_repo' "$mirror/https://github.com/ScoopInstaller/Scoop" 
+        }
+        if($val -eq "false"){
+            # change scoop_repo url
+            $null = set_config 'scoop_repo' "https://github.com/ScoopInstaller/Scoop" 
+        }
     }else{
         $buckets = @($bucket)
     }
@@ -1161,9 +1194,7 @@ Write-Host "[scoopex] Run: '$cmds'" -ForegroundColor Green
 Invoke-Expression $cmds
 
 # post action
-if ($args[0] -eq 'install' -OR $args[0] -eq 'download' -OR $args[0]) {
-    if ($null -ne $pre_json_content -AND $pre_json_content -ne "") {
-        Set-Content -Path $app_file -Value $pre_json_content -Encoding UTF8
-        Write-Host "[scoopex] Restore file: $app_file" -ForegroundColor Yellow
-    }
+if($args[0] -in @("install", "download", "update")){
+    Write-Host "[scoopex] Reset Buckets Changes." -ForegroundColor Yellow
+    Reset-BucketsChanges
 }
