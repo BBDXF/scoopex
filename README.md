@@ -4,7 +4,7 @@ A enhance script for scoop, add online app search, url clean mirror, scoop githu
 Features:
 - `scoopex install`
 	- `scoopex install 7zip` 同时支持 online 设定
-	- `scoopex install bucket/7zip` TODO
+	- `scoopex install bucket/7zip` Done
 	- `scoopex install https://xxxxx/7zip.json`
 - `scoopex mirror`
 	- 获取大佬们分享的Github Mirror/Proxy 地址，然后设置到scoopex中，方便后续使用
@@ -25,7 +25,7 @@ Features:
 使用以上功能，完全可以抛弃传统的bucket更新功能，直接使用online方式管理和更新APP，十分方便。  
 你也可以只使用scoop自身的功能，当遇到问题时，再使用本工具解决。完全不影响。  
 
-
+# How to use
 ```bash
 Scoopex is the enhanced extension of Scoop, it provides more functions to support url mirror, url clean, bucket mirror and online app mode.
 
@@ -54,6 +54,9 @@ https://gitcode.com/mycat
 https://bbdxf.blog.csdn.net
 ```
 
+可用Github Proxy 查找网站:
+https://github.akams.cn/
+
 添加为bucket
 ```bash
 scoop bucket add bbdxf https://github.com/BBDXF/scoopex
@@ -69,13 +72,14 @@ scoopex init
 # do anything
 ```
 
+
 # scoop install for chinese region
 ```bash
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
-Invoke-RestMethod -Uri https://github.com/BBDXF/scoopex/bin/scoopex-install.ps1 | Invoke-Expression
-# Invoke-RestMethod -Uri https://gh-proxy.com/https://github.com/BBDXF/scoopex/bin/scoopex-install.ps1 | Invoke-Expression
-# Invoke-RestMethod -Uri https://ghproxy.net/https://github.com/BBDXF/scoopex/bin/scoopex-install.ps1 | Invoke-Expression
+Invoke-RestMethod -Uri https://raw.githubusercontent.com/BBDXF/scoopex/refs/heads/main/bin/scoopex-install.ps1 | Invoke-Expression
+# Invoke-RestMethod -Uri https://gh-proxy.com/https://raw.githubusercontent.com/BBDXF/scoopex/refs/heads/main/bin/scoopex-install.ps1 | Invoke-Expression
+# Invoke-RestMethod -Uri https://ghproxy.net/https://raw.githubusercontent.com/BBDXF/scoopex/refs/heads/main/bin/scoopex-install.ps1 | Invoke-Expression
 ```
 
 # Note
