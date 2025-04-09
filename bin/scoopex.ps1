@@ -12,7 +12,13 @@ function Get-MakeFullPath {
         [Parameter(Mandatory = $true)]
         [string]$Path
     )
-    $outDir = Split-Path $OutputFile -Parent
+    $outDir = ""
+    if($Path.EndsWith('/') -or $Path.EndsWith('\\')) {
+        $outDir = $Path
+    }else{
+        $outDir = Split-Path $Path -Parent
+    }
+    # Write-Host "path: $Path, outDir: $outDir"
     if (!(Test-Path $outDir)) {
         New-Item -ItemType Directory -Path $outDir -Force | Out-Null
     }
@@ -117,7 +123,7 @@ function Send-HttpPostJson {
 }
 
 
-function Get-GitHubProxy {
+function Get-GitHubProxy2 {
     $url = "https://status.akams.cn/status/services"
     $resp = Get-HttpGet $url
     if (!$resp) { return $null }
@@ -136,6 +142,9 @@ function Get-GitHubProxy {
         if($gh_index2 -gt 0 -and $gh_index3 -gt 0) {
             $gh_url = $html.Substring($gh_index2 + 7, $gh_index3 - $gh_index2 - 7)
             $decode_url = [System.Text.RegularExpressions.Regex]::Unescape($gh_url)
+            if( $decode_url.EndsWith('/') -or $decode_url.EndsWith('\\') ){
+                $decode_url = $decode_url.Substring(0, $decode_url.Length - 1)
+            }
             # Write-Host "GitHub Proxy: $decode_url"
             $proxies_show += [PSCustomObject]@{Index = $i++; Url = $decode_url }
             $gh_index1 = $gh_index3+1
@@ -144,33 +153,45 @@ function Get-GitHubProxy {
         }
     }
     return $proxies_show
-    # # request
-    # $response = Invoke-WebRequest -Uri "https://api.akams.cn/github" -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.5615.49 Safari/537.36" -TimeoutSec 30
-    # $json = $response.Content | ConvertFrom-Json
-    # $proxies = $json.data
+}
+function Get-GitHubProxy {
+    # request
+    $response = Invoke-WebRequest -Uri "https://api.akams.cn/github" -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.5615.49 Safari/537.36" -TimeoutSec 30
+    $json = $response.Content | ConvertFrom-Json
+    $proxies = $json.data
 
-    # # check
-    # if ($proxies.Count -eq 0) {
-    #     Write-Warning "No Proxy Available!"
-    #     return $null
-    # }
+    # check
+    if ($proxies.Count -eq 0) {
+        Write-Warning "No Proxy Available!"
+        return $null
+    }
 
-    # # format output
-    # $i = 1
-    # $proxies_show = @()
-    # $proxies | ForEach-Object {
-    #     $index = $i++
-    #     $url = $_.url
-    #     $ip = $_.ip
-    #     $latency = $_.latency
-    #     $speed = $_.speed
-    #     $proxies_show += [PSCustomObject]@{Index = $index; Url = $url; Ip = $ip; Latency = $latency; Speed = $speed }
-    # }
+    # format output
+    $i = 1
+    $proxies_show = @()
+    $proxies | ForEach-Object {
+        $index = $i++
+        $url = $_.url
+        $ip = $_.ip
+        $latency = $_.latency
+        $speed = $_.speed
+        $proxies_show += [PSCustomObject]@{Index = $index; Url = $url; Ip = $ip; Latency = $latency; Speed = $speed }
+    }
+    return $proxies_show
 }
 
 function Select-GitHubProxy {
     try {
+        Write-Host "[scoopex] Method 1 - Loading GitHub Proxy..."
         $proxies_show = Get-GitHubProxy
+        if ( $null -eq $proxies_show -OR $proxies_show.Count -eq 0) {
+            Write-Host "[scoopex] Method 2 - Loading GitHub Proxy..."
+            $proxies_show = Get-GitHubProxy2
+        }
+        if ( $null -eq $proxies_show -OR $proxies_show.Count -eq 0) {
+            Write-Warning "[scoopex] No Proxy Available!"
+            return $null
+        }
         $proxies_show | Format-Table | Out-Host
         # User select
         $index = Read-Host "Input your choice (1-$($proxies_show.Count))"
@@ -271,7 +292,8 @@ function Get-OnlineScoopApp {
 function Select-OnlineScoopApp {
     param (
         [Parameter(Mandatory = $true)]
-        [string]$Name
+        [string]$Name,
+        [string]$Bucket
     )
     $apps = Get-OnlineScoopApp $Name
     if ($apps.Count -eq 0) {
@@ -281,6 +303,11 @@ function Select-OnlineScoopApp {
     $apps_show = @()
     $i = 0
     $apps | ForEach-Object {
+        if($Bucket -and $Bucket.Length -gt 0) {
+            if(!$_.Repository.ToLower().EndsWith($Bucket.ToLower())) {
+                return
+            }
+        }
         $i++
         $apps_show += [PSCustomObject]@{Index = $i; Name = $_.Name; Version = $_.Version; Stars = $_.Stars; UpdateDate = $_.Committed.Substring(0, 10); 
             License = $_.License; Repository = $_.Repository; Description = $_.Description;  
@@ -329,6 +356,22 @@ function Get-CleanUrl {
     return $url_new
 }
 
+function Get-CleanUrlContent {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Content
+    )
+    # reg match "url": "https://github.com/
+    if($Content -match '"url":\s*"(https?:\/\/[^\/]+)\/https:\/\/github\.com\/([^"]+)"') {
+        $Content = $Content -replace '"url":\s*"https?:\/\/[^\/]+\/https:\/\/github\.com\/([^"]+)"', '"url": "https://github.com/$1"'
+    }
+    # reg match "url": "https://raw.githubusercontent.com/
+    if($Content -match '"url":\s*"(https?:\/\/[^\/]+)\/https:\/\/raw\.githubusercontent\.com\/([^"]+)"') {
+        $Content = $Content -replace '"url":\s*"https?:\/\/[^\/]+\/https:\/\/raw\.githubusercontent\.com\/([^"]+)"', '"url": "https://raw.githubusercontent.com/$1"'
+    }
+    return $Content
+}
+
 <#
 .SYNOPSIS
 Get the url with github mirror.
@@ -360,6 +403,23 @@ function Get-MirrorUrl {
     }
     $mirror_url = "$mirror$url_clean"
     return $mirror_url
+}
+function Get-MirrorUrlContent {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Content,
+        [Parameter(Mandatory = $true)]
+        [string]$Mirror
+    )
+    # reg match "url": "https://github.com/
+    if($Content -match '"url":\s*"https:\/\/github\.com\/([^"]+)"') {
+        $Content = $Content -replace '"url":\s*"https:\/\/github\.com\/([^"]+)"', ('"url": "' + $Mirror + '/https://github.com/$1"')
+    }
+    # reg match "url": "https://raw.githubusercontent.com/
+    if($Content -match '"url":\s*"https:\/\/raw\.githubusercontent\.com\/([^"]+)"') {
+        $Content = $Content -replace '"url":\s*"https:\/\/raw\.githubusercontent\.com\/([^"]+)"', ('"url": "' + $Mirror + '/https://raw.githubusercontent.com/$1"')
+    }
+    return $Content
 }
 
 function Get-HttpJsonToFile {
@@ -405,6 +465,7 @@ function ConvertTo-RawUrl {
         # }
         $rawUrl = $rawUrl -replace 'github\.com', 'raw.githubusercontent.com' `
             -replace '/blob/', '/refs/heads/' 
+        Write-Host "[scoopex] Convert Url: $rawUrl"
     }
     # https://gitee.com/mars4312/tv-box/blob/master/xiaoyu.txt
     # https://gitee.com/mars4312/tv-box/raw/master/xiaoyu.txt
@@ -416,9 +477,75 @@ function ConvertTo-RawUrl {
         #     $rawUrl = $rawUrl -replace '/main/', '/blob/main/'
         # }
         $rawUrl = $rawUrl -replace '/blob/', '/raw/'
+        Write-Host "[scoopex] Convert Url: $rawUrl"
     }
 
     return $rawUrl
+}
+
+function Get-OnlineList{
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+    $file = $scoopdir + '/buckets/online/app.json'
+    if(!(Test-Path $file)){
+        return $null
+    }
+    $json = Get-Content $file | ConvertFrom-Json
+    if(!$json){
+        return $null
+    }
+    $apps = $json.Apps | Where-Object { $_.Name -eq $Name }
+    if($null -ne $apps -AND $apps.Count -gt 0){
+        return $apps[0]
+    }
+    return $null
+}
+function List-OnlineList{
+    $file = $scoopdir + '/buckets/online/app.json'
+    if(!(Test-Path $file)){
+        return @()
+    }
+    $json = Get-Content $file | ConvertFrom-Json
+    if(!$json){
+        return @()
+    }
+    return @($json.Apps)
+}
+
+function Set-OnlineList{
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+        [Parameter(Mandatory = $true)]
+        [string]$Url
+    )
+    $file = $scoopdir + '/buckets/online/app.json'
+    if(!(Test-Path $file)){
+        '{ "Count": 0, "Apps": [] }' | Out-File $file -Encoding UTF8
+    }
+    $json = Get-Content $file | ConvertFrom-Json
+    if(!$json){
+        $json = @{
+            Count = 0
+            Apps = @()
+        }
+    }
+    # duplicate, get it's index in Apps array.
+    for($i=0; $i -lt $json.Apps.Count; $i++){
+        if($json.Apps[$i].Name -eq $Name){
+            if($json.Apps[$i].Url -ne $Url){
+                $json.Apps[$i].Url = $Url
+                $json | ConvertTo-Json | Out-File $file -Encoding UTF8                
+            }
+            return
+        }
+    }
+    # add item
+    $json.Count++
+    $json.Apps += [PSCustomObject]@{Name = $Name; Url = $Url}
+    $json | ConvertTo-Json | Out-File $file -Encoding UTF8
 }
 
 function Get-LocalTmpBucketApp {
@@ -450,6 +577,7 @@ function Get-LocalTmpBucketApp {
         Write-Warning "[scoopex] Download '$app_name' failed."
         return $null
     }
+    Set-OnlineList $app_name $Url
     return [PSCustomObject]@{ Name = $app_name; File = $file; Url = $rawurl; }
 }
  
@@ -464,23 +592,31 @@ function Get-LocalTmpBucketApp {
 # 推荐app list和bucket list
 
 if ($args.Count -eq 0) {
-    Write-Host "Scoopex v1.1.0"
-    Write-Host "Scoopex is the enhanced extension of Scoop, it provides more functions to support url mirror, url clean and online app mode."
+    Write-Host "Scoopex is the enhanced extension of Scoop, it provides more functions to support url mirror, url clean, bucket mirror and online app mode."
     Write-Host ""
     Write-Host "Usage: scoopex <command> [<args>]"
     Write-Host "Commands:"
-    Write-Host "  mirror  => List and set the mirror url."
-    Write-Host "  online <true/false> => Set the online mode. also can set using scoop config online."
-    Write-Host "  clean <true/false>  => Set the url clean mode. also can set using scoop config clean."
-    Write-Host "  error-run <true/false> => Set the error case process action. also can set using scoop config error-run."
-    Write-Host "  install <app> => Install the app using config online mode."
-    Write-Host "  download <app> => Download the app using config online mode."
-    Write-Host "  update <app>  => Update the app using config online mode."
-    Write-Host "  search <app>  => Search the app using online mode."
-    Write-Host "  status => Show the scoopex status and scoop status."
+    Write-Host "  init    => Init the scoopex config using default setting."
+    Write-Host "  mirror  => List and select the mirror url."
+    Write-Host "  online <true/false>    => Set the online mode. also can set using scoop config online."
+    Write-Host "  clean <true/false>     => Set the url clean mode. also can set using scoop config clean."
+    Write-Host "  install <app>  => Install the app using config setting."
+    Write-Host "  download <app> => Download the app using config setting."
+    Write-Host "  update <app>   => Update the app using config setting."
+    Write-Host "  search <app>   => Search the app using config setting."
+    Write-Host "  status         => Show the scoopex status and scoop status."
+    Write-Host "  ..."
+    Write-Host "  app-bucket <app> <bucket> => Set/get the app bucket. app can be *, means all. if bucket is not set, it will use online."
+    Write-Host "  fix-bucket                => Math app with local bucket app list. if found, change app bucket to local bucket. otherwise, change app bucket to online."
+    Write-Host "  mirr-bucket <bucket> <true/false/url> => Set/get the bucket git url. true will add mirror. false will remove mirror. url will set the mirror url."
     Write-Host "  ..."
     Write-Host ""
     Write-Host "Beside above scoopex commands, it support call all scoop commands directly. You can use it replace scoop command." -ForegroundColor Blue
+    Write-Host ""
+    Write-Host "By BBDXF" -ForegroundColor Red
+    Write-Host "https://github.com/BBDXF" -ForegroundColor Red
+    Write-Host "https://gitcode.com/mycat" -ForegroundColor Red
+    Write-Host "https://bbdxf.blog.csdn.net" -ForegroundColor Red
     exit 0
 }
 
@@ -492,13 +628,11 @@ if ($null -ne $proxy) {
 $default_mirror = "https://gh-proxy.com"
 $mirror = get_config 'mirror'
 if ($null -eq $mirror) {
-    $mirror = $default_mirror
-    set_config 'mirror' $default_mirror
-    Write-Warning "[scoopex] Mirror is not set! Use default setting $default_mirror."
+    Write-Host "[scoopex] Mirror is not set!" -ForegroundColor Yellow
 }
-if (!$mirror.StartsWith("https://")) {
-    $mirror = $default_mirror
-    Write-Warning "[scoopex] Mirror url is illegal! Use default setting $default_mirror."
+elseif (!$mirror.StartsWith("https://")) {
+    Write-Warning "[scoopex] Mirror url is illegal! Use 'scoopex mirror' to change it!"
+    exit 1
 }
 # Write-Host "[scoopex] Current Mirror: $mirror" 
 
@@ -506,31 +640,61 @@ if (!$mirror.StartsWith("https://")) {
 $online = get_config 'online'
 if ($null -eq $online) {
     $online = $false
-    set_config 'online' $false
+    $null = set_config 'online' $false
 }
 # Write-Host "[scoopex] Online Mode: $online"  
 
 $clean = get_config 'clean'
 if ($null -eq $clean) {
     $clean = $false
-    set_config 'clean' $false
+    $null = set_config 'clean' $false
 }
 # Write-Host "[scoopex] Url Clean Mode: $clean"
 
-$error_run = get_config 'error-run'
-if ($null -eq $error_run) {
-    $error_run = $true
-    set_config 'error-run' $true
+# pre-action variables
+$pre_json_content = ""
+
+
+# init
+if($args[0] -eq 'init') {
+    # default config for scoopex
+    $null = set_config 'online' $true
+    $null = set_config 'clean' $true
+    if(get_config 'proxy') {
+        Write-Host "[scoopex] The scoop proxy is enabled, may conflex with scoopex mirror. disable scoopex mirror function." -ForegroundColor Yellow
+        $null = set_config 'mirror' $null
+    }else{
+        $null = set_config 'mirror' $default_mirror
+        Write-Host "[scoopex] Set default mirror: $default_mirror" -ForegroundColor Yellow
+    }
+    # default config for scoop
+    $null = set_config 'aria2-enabled' $false
+    $null = set_config 'autostash_on_conflict' $true
+    $null = set_config 'force_update' $true
+    # $null = set_config 'use_sqlite_cache' $false
+
+    # proxy: [username:password@]host:port
+    # autostash_on_conflict: $true|$false
+    # force_update: $true|$false
+    # scoop_repo: http://github.com/ScoopInstaller/Scoop
+    # scoop_branch: master|develop
+    # root_path: $Env:UserProfile\scoop
+    # global_path: $Env:ProgramData\scoop
+    # use_external_7zip: $true|$false
+    # use_sqlite_cache: $true|$false   
+
+    Get-MakeFullPath "$scoopdir/buckets/online/bucket/"
+
+    Write-Host "[scoopex] Init done. User 'scoopex status' to check." -ForegroundColor Green
+    exit 0
 }
-# Write-Host "[scoopex] Error Run Mode: $error_run"
 
 # mirror
 if ($args[0] -eq 'mirror') {
     $ghmirror = Select-GitHubProxy
     if ($ghmirror) {
-        Write-Host "Current Select Mirror: $($ghmirror.Url)"
+        Write-Host "Current Github Mirror: $($ghmirror.Url)" -ForegroundColor Green
         Invoke-Expression "scoop config mirror $($ghmirror.Url)"
-        Invoke-Expression "scoop config online true" 
     }
     exit 0 
 }
@@ -557,16 +721,6 @@ if ($args[0] -eq 'clean') {
     exit 0  
 }
 
-# error-run
-if ($args[0] -eq 'error-run') {
-    if ( $args.Count -ne 2) {
-        Invoke-Expression "scoop config error-run"
-        exit 0
-    }
-    $val = $args[1]
-    Invoke-Expression "scoop config error-run $val"
-    exit 0  
-}
 
 # status
 if ($args[0] -eq 'status') {
@@ -574,7 +728,6 @@ if ($args[0] -eq 'status') {
     Write-Host "  Mirror Url: $mirror"
     Write-Host "  Online Mode: $online"  
     Write-Host "  Url Clean Mode: $clean"
-    Write-Host "  Error Run Mode: $error_run"
     Write-Host ""
     Write-Host "Scoop Status:"
     Invoke-Expression "scoop status"
@@ -588,75 +741,429 @@ if ($args[0] -eq 'search') {
         exit 1
     }
     $app = $args[1]
-    $rlst = Select-OnlineScoopApp $app 
+    $app_bucket = ""
+    $app_name = $app
+    # bucket/app
+    if($app -match '^([^/]+)/([^/]+)$'){
+        $app_bucket = $matches[1]
+        $app_name = $matches[2]
+    }else{
+        $app_bucket = ""
+        $app_name = $app
+    }
+    $rlst = Select-OnlineScoopApp $app_name $app_bucket 
     if ($rlst) {
         $rlst | Format-List | Out-Host
         exit 0
     }
     # if no reslut, use local scoop search 
-    if ($error_run -eq $false) {
-        exit 1
-    }
-    Write-Warning "[scoopex] No result found, use local scoop search."
+    Write-Host "[scoopex] No result found, use local scoop search." -ForegroundColor Red
 }
 
+function Get-ScoopInstalledApps {
+    $apps = @()
+    $dir = appsdir $false
+    if (Test-Path $dir) {
+        # Get-ChildItem $dir | Where-Object { $_.psiscontainer -and $_.name -ne 'scoop' } | ForEach-Object { $_.name }
+        foreach($app_dir in (Get-ChildItem $dir)){
+            if($app_dir.psiscontainer -and $app_dir.name -ne 'scoop'){
+                $apps += $app_dir.name
+            }
+        }
+    }
+    return $apps
+}
+
+function Set-BucketAppUrlByConfig(){
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$app_bucket_file
+    )
+    # modify bucket/xxx.json url
+    $Content = Get-Content $app_bucket_file -Raw
+    $old_content = $Content
+    if($clean -eq $true) {
+        $Content = Get-CleanUrlContent $Content
+        Write-Host "[scoopex] Clean App Url..." -ForegroundColor Yellow
+    }
+    if ($null -ne $mirror) {
+        $Content = Get-MirrorUrlContent $Content $mirror
+        Write-Host "[scoopex] Add Mirror for App Url..." -ForegroundColor Yellow
+    }
+    Set-Content -Path $app_bucket_file -Value $Content -Encoding UTF8
+    return $old_content
+}
 
 # install/download/update
-if ($args[0] -eq 'install' -OR $args[0] -eq 'download' -OR $args[0] -eq 'update') {
+if ($args[0] -eq 'install' -OR $args[0] -eq 'download') {
     if ( $args.Count -ne 2) {
         Write-Host "Usage: scoopex $($args[0]) <app>"
         exit 1
     }
     $app_url = $args[1]
     $app_name = ""
-    $app_file = ""
+    $app_bucket = ""
+    $app_bucket_file = ""
     # url method
     if ($app_url.StartsWith("https://") -OR $app_url.StartsWith("http://")) {
-        $app = Get-LocalTmpBucketApp $app_url ""
-        if ($app) {
-            $app_name = $app.Name
-            $app_file = $app.File
+        $appTmp = Get-LocalTmpBucketApp $app_url ""
+        if ($appTmp) {
+            $app_name = $appTmp.Name
+            $app_bucket_file = $appTmp.File
+            $app_bucket = "online"
         }
     }
     else {
         # app name method
-        if ($online -eq $true) {
-            $app = $app_url
-            $rlst = Select-OnlineScoopApp $app 
+        $app = $app_url
+        # bucket/app
+        if($app -match '^([^/]+)/([^/]+)$'){
+            $app_bucket = $matches[1]
+            $app_name = $matches[2]
+            $app_bucket_file = $scoopdir +"/buckets/$app_bucket/bucket/$app_name.json"
+        }else{
+            $app_bucket = ""
+            $app_name = $app
+            $app_bucket_file = ""
+        }
+
+        # scoop app
+        $scoop_apps = Get-ScoopInstalledApps
+        # Write-Host "[scoopex] Scoop Apps: $scoop_apps"
+        if ($scoop_apps -contains $app_name) {
+            # bucket test
+            $install_file = (appsdir $false) + "/$app_name/current/install.json"
+            if (Test-Path $install_file) {
+                $install_json = Get-Content $install_file | ConvertFrom-Json
+                if ($install_json -and $install_json.bucket) {
+                    $app_bucket = $install_json.bucket
+                    $app_bucket_file = $scoopdir +"/buckets/$app_bucket/bucket/$app_name.json"
+                    Write-Host "[scoopex] Found App '$app_name' in Bucket '$app_bucket'" -ForegroundColor Green
+                    if($app_bucket -eq "online"){
+                        # online/xxx
+                        $online_app = Get-OnlineList $app_name
+                        if ($null -ne $online_app) {
+                            Write-Host "[scoopex] Update App '$app_name' from https://scoop.sh." -ForegroundColor Green
+                            $null = Get-LocalTmpBucketApp $online_app.Url $app_name
+                        }
+                    }
+                }
+            }
+        }else{
+            # scoop.sh online search
+            $rlst = Select-OnlineScoopApp $app_name $app_bucket
+            # Write-Host "[scoopex] Online Search Result: $rlst"
             if ($rlst) {
                 $rlst | Format-List | Out-Host
                 $url = $rlst.Repository + '/blob/master/' + $rlst.FilePath
-                $app = Get-LocalTmpBucketApp $url $rlst.Name
-                if ($app) {
-                    $app_name = $app.Name
-                    $app_file = $app.File
+                $appTmp = Get-LocalTmpBucketApp $url $rlst.Name
+                if ($appTmp) {
+                    $app_name = $appTmp.Name
+                    $app_bucket_file = $appTmp.File
+                    $app_bucket = "online"
+                }
+            }
+        }
+        
+    }
+
+    # modify bucket/xxx.json url
+    if ($null -ne $app_bucket -AND $app_bucket -ne "") {
+        $pre_json_content = Set-BucketAppUrlByConfig $app_bucket_file
+    }
+
+    # install online/xxx
+    if ($null -ne $app_bucket -AND $app_bucket -ne "") {    
+        Write-Host "[scoopex] scoop $($args[0]) '$app_bucket/$app_name'" -ForegroundColor Green
+        Invoke-Expression "scoop $($args[0]) $app_bucket/$app_name"
+
+        # restore bucket/xxx.json url
+        if ($null -ne $pre_json_content -AND $pre_json_content -ne "") {
+            Set-Content -Path $app_bucket_file -Value $pre_json_content -Encoding UTF8
+        }
+    }
+    exit 0
+}
+
+if($args[0] -eq 'update') {
+    if($args.Count -eq 2 ) {
+        $app = $args[1]
+        if( $app -eq 'all' -OR $app -eq '*' ){
+            $app = $null
+        }
+        if(is_scoop_outdated){
+            Write-Host "[scoopex] Scoop is outdated, update it first." -ForegroundColor Yellow
+            Invoke-Expression "scoop update"
+        }
+        # scoop app
+        $scoop_apps = Get-ScoopInstalledApps
+        # Write-Host "[scoopex] Scoop Apps: $scoop_apps"
+        foreach($app_name in $scoop_apps) {
+            if($null -ne $app -AND $app -ne $app_name){
+                continue
+            }
+            # bucket test
+            $install_file = (appsdir $false) + "/$app_name/current/install.json"
+            if (Test-Path $install_file) {
+                $install_json = Get-Content $install_file | ConvertFrom-Json
+                if ($install_json -and $install_json.bucket) {
+                    $app_bucket = $install_json.bucket
+                    $app_bucket_file = $scoopdir +"/buckets/$app_bucket/bucket/$app_name.json"
+                    if($app_bucket -eq "online"){
+                        # online/xxx
+                        $online_app = Get-OnlineList $app_name
+                        if ($null -ne $online_app) {
+                            Write-Host "[scoopex] Update App '$app_name' from https://scoop.sh." -ForegroundColor Green
+                            $null = Get-LocalTmpBucketApp $online_app.Url $app_name
+                        }
+                    }
+                    $null = Set-BucketAppUrlByConfig $app_bucket_file
+                    Write-Host "[scoopex] Process '$app_name' in Bucket '$app_bucket'" -ForegroundColor Green
                 }
             }
         }
     }
-    # install online/xxx
-    if ($null -ne $app_name -AND $app_name -ne "") {    
-        Write-Host "[scoopex] scoop download 'online/$app_name'" -ForegroundColor Green
-        Invoke-Expression "scoop download online/$app_name"
-        # install/update online/xxx
-        if ($args[0] -eq 'install') {
-            Write-Host "[scoopex] scoop install 'online/$app_name'" -ForegroundColor Green
-            Invoke-Expression "scoop install online/$app_name"
-        }
-        if ($args[0] -eq 'update') {
-            Write-Host "[scoopex] scoop update 'online/$app_name'" -ForegroundColor Green
-            Invoke-Expression "scoop update online/$app_name"
-        }
-        exit 0
-    }
-
-    if ($error_run -eq $false) {
-        exit 0
-    }
+    # continue to use scoop update
 }
 
+# app-bucket <app> <bucket>
+if ($args[0] -eq 'app-bucket') {
+    $apps = @()
+    $bucket = ""
+    if ( $args.Count -eq 1 -OR (  $args.Count -eq 2 -AND ($args[1] -eq "*" -OR $args[1] -eq "all") )) {
+        # list all app bucket
+        Write-Host "App Bucket List:"
+        $apps = Get-ScoopInstalledApps
+        foreach($app in $apps) {
+            $install_file = (appsdir $false) + "/$app/current/install.json"
+            if (Test-Path $install_file) {
+                $install_json = Get-Content $install_file | ConvertFrom-Json
+                if ($install_json -and $install_json.bucket) {
+                    $bucket = $install_json.bucket
+                    Write-Host ("  {0,-18}: {1}" -f $app, $bucket)
+                }
+            }
+        }
+        exit 0
+    }
+    
+    # set app bucket
+    $app = $args[1]
+    if ( $args.Count -eq 3) {
+        $bucket = $args[2]
+    }
+    if($app -eq "*" -OR $app -eq "all") {
+        $apps = Get-ScoopInstalledApps
+    }else{
+        $apps = @($app)
+    }
+    foreach($app in $apps) {
+        $install_file = (appsdir $false) + "/$app/current/install.json"
+        if (Test-Path $install_file) {
+            $install_json = Get-Content $install_file | ConvertFrom-Json
+            if ($install_json -and $install_json.bucket) {
+                $bucket_old = $install_json.bucket
+                if($null -ne $bucket -AND $bucket -ne ""){
+                    Write-Host ("  App {0,-18}: {1,-12} => {2,-12}" -f $app, $bucket_old, $bucket) -ForegroundColor Green
+                    $install_json.bucket = $bucket
+                    $install_json | ConvertTo-Json | Out-File $install_file -Encoding UTF8
+                }else{
+                    Write-Host ("  App {0,-18}: {1,-12}" -f $app, $bucket_old)
+                }
+            }
+        }else{
+            Write-Host ("  App {0,-18} package is broken!" -f $app) -ForegroundColor Red
+        }
+    }
+    exit 0
+}
+
+function Get-AppInBucket{
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+    $offical_buckets = @("main", "extras", "versions", "nonportable", "nirsoft", "sysinternals")
+    # find in offical buckets
+    foreach($bucket in $offical_buckets) {
+        $app_file = $scoopdir + "/buckets/$bucket/bucket/$Name.json"
+        if (Test-Path $app_file) {
+            return $bucket
+        }
+    }
+    # find in other buckets
+    $buckets = Get-ChildItem $scoopdir/buckets -Directory
+    foreach($bucket in $buckets) {
+        if($bucket.Name -in $offical_buckets){
+            continue
+        }
+        $app_file = $bucket.FullName + "/bucket/$Name.json"
+        if (Test-Path $app_file) {
+            return $bucket.Name
+        }
+    }
+    return $null
+}
+
+# fix-bucket
+if ($args[0] -eq 'fix-bucket') {
+    foreach($app in (Get-ScoopInstalledApps)) {
+        $bucket = Get-AppInBucket $app
+        if($null -ne $bucket -AND $bucket -ne ""){
+            $install_file = (appsdir $false) + "/$app/current/install.json"
+            if (Test-Path $install_file) {
+                $install_json = Get-Content $install_file | ConvertFrom-Json
+                $bucket_old = $install_json.bucket
+                if ($install_json -and $install_json.bucket) {
+                    if($bucket_old -ne $bucket){
+                        Write-Host ("  App {0,-18}: {1,-12} => {2,-12}" -f $app, $bucket_old, $bucket) -ForegroundColor Green
+                        $install_json.bucket = $bucket
+                        $install_json | ConvertTo-Json | Out-File $install_file -Encoding UTF8
+                    }else{
+                        Write-Host ("  App {0,-18}: {1,-12} keep." -f $app, $bucket_old, $bucket) -ForegroundColor Gray
+                    }
+                }
+            }
+        }else{
+            Write-Host ("  App {0,-18} bucket not found, set to 'online'" -f $app) -ForegroundColor Red
+            $install_file = (appsdir $false) + "/$app/current/install.json"
+            if (Test-Path $install_file) {
+                $install_json = Get-Content $install_file | ConvertFrom-Json
+                $install_json.bucket = "online"
+                $install_json | ConvertTo-Json | Out-File $install_file -Encoding UTF8
+            }
+        }
+    }
+    exit 0
+}
+
+function Get-GitRepoUrl {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+    # cd to the directory
+    Push-Location $Path
+    try {
+        # git config --get remote.origin.url
+        $remoteUrl = git config --get remote.origin.url
+        if ($remoteUrl) {
+            return $remoteUrl
+        }
+    }
+    finally {
+        # back to the original directory
+        Pop-Location
+    }
+    return $null
+}
+
+function Set-GitRepoUrl {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$Url
+    )
+    # cd to the directory
+    Push-Location $Path
+    try {
+        # git remote set-url origin <url>
+        git remote set-url origin $Url
+        return $true
+    }
+    finally {
+        # back to the original directory
+        Pop-Location
+    }
+    return $false
+}
+
+# mirr-bucket <bucket> <true/false/url>
+if ($args[0] -eq 'mirr-bucket') {
+    if ( $args.Count -eq 1) {
+        # list all bucket git url
+        Write-Host "Bucket Git Url List:"
+        $buckets = Get-ChildItem "$scoopdir/buckets/" -Directory
+        foreach($bucket in $buckets) {
+            $repo_url = Get-GitRepoUrl $bucket.FullName
+            if($null -ne $repo_url -AND $repo_url -ne ""){
+                Write-Host ("  {0,-12} => {1}" -f $bucket.Name, $repo_url) -ForegroundColor Green
+            }else{
+                Write-Host ("  {0,-12} is not git repo!" -f $bucket.Name) -ForegroundColor Red
+            }
+        }
+        exit 0
+    }
+
+    # set bucket git url
+    $bucket = $args[1]
+    $val = ""
+    if ( $args.Count -eq 3) {
+        $val = $args[2]
+    }
+    $buckets = @()
+    if($bucket -eq "*" -OR $bucket -eq "all") {
+        $buckets = Get-ChildItem "$scoopdir/buckets/" -Directory | ForEach-Object { $_.Name }
+    }else{
+        $buckets = @($bucket)
+    }
+    foreach($bucket_name in $buckets) {
+        $repo_url = $null
+        if(Test-Path "$scoopdir/buckets/$bucket_name"){
+            $repo_url = Get-GitRepoUrl "$scoopdir/buckets/$bucket_name"
+        }
+        if($null -ne $repo_url -AND $repo_url -ne ""){
+            if($args.Count -eq 2){
+                Write-Host ("  {0,-12} => {1}" -f $bucket_name, $repo_url) -ForegroundColor Green
+            }else{
+                if($val -eq "true" -AND $mirror -ne ""){
+                    $repo_url_new = Get-CleanUrl $repo_url
+                    $repo_url_new = Get-MirrorUrl $repo_url_new
+                    if($repo_url_new -ne $repo_url){
+                        $null = Set-GitRepoUrl "$scoopdir/buckets/$bucket_name" $repo_url_new
+                        Write-Host ("  Bucket {0,-12}: {1} => {2}" -f $bucket_name,$repo_url, $repo_url_new) -ForegroundColor Green
+                    }else{
+                        Write-Host ("  Bucket {0,-12}: {1}, keep." -f $bucket_name,$repo_url) -ForegroundColor Gray
+                    }
+                }elseif($val -eq "false"){
+                    $repo_url_new = Get-CleanUrl $repo_url
+                    if($repo_url_new -ne $repo_url){
+                        $null = Set-GitRepoUrl "$scoopdir/buckets/$bucket_name" $repo_url_new
+                        Write-Host ("  Bucket {0,-12}: {1} => {2}" -f $bucket_name,$repo_url, $repo_url_new) -ForegroundColor Green
+                    }else{
+                        Write-Host ("  Bucket {0,-12}: {1}, keep." -f $bucket_name,$repo_url) -ForegroundColor Gray
+                    }
+                }elseif($val.StartsWith("https://") -OR $val.StartsWith("http://")){
+                    $repo_url_new = Get-CleanUrl $val
+                    $repo_url_new = Get-MirrorUrl $repo_url_new
+                    if($repo_url_new -ne $repo_url){
+                        $null = Set-GitRepoUrl "$scoopdir/buckets/$bucket_name" $repo_url_new
+                        Write-Host ("  Bucket {0,-12}: {1} => {2}" -f $bucket_name,$repo_url, $repo_url_new) -ForegroundColor Green
+                    }else{
+                        Write-Host ("  Bucket {0,-12}: {1}, keep." -f $bucket_name,$repo_url) -ForegroundColor Gray
+                    }
+                }else{
+                    Write-Host ("  Bucket {0,-12}: git url '{1}' invalied." -f $bucket_name, $val) -ForegroundColor Red
+                }
+
+            }
+        }else{
+            Write-Host ("  Bucket {0,-12} is not git repo!" -f $bucket_name) -ForegroundColor Red
+        }
+    }
+    exit 0
+}
 
 # default call scoop function
 $cmds = "scoop $args"
-Write-Host "[scoopex] Run: $cmds" -ForegroundColor Green
+Write-Host "[scoopex] Run: '$cmds'" -ForegroundColor Green
 Invoke-Expression $cmds
+
+# post action
+if ($args[0] -eq 'install' -OR $args[0] -eq 'download' -OR $args[0]) {
+    if ($null -ne $pre_json_content -AND $pre_json_content -ne "") {
+        Set-Content -Path $app_file -Value $pre_json_content -Encoding UTF8
+        Write-Host "[scoopex] Restore file: $app_file" -ForegroundColor Yellow
+    }
+}
