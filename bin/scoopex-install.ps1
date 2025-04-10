@@ -17,7 +17,7 @@ $scoop_dir = ""
 
 # app
 $scoop_ps_url = "https://raw.githubusercontent.com/ScoopInstaller/Install/master/install.ps1"
-$scoopex_url = "https://www.github.com/BBDXF/scoopex"
+$scoopex_url = "https://github.com/BBDXF/scoopex"
 
 function Merge-Hashtables {
     param(
@@ -95,8 +95,10 @@ if (!$proxies_show) {
 }
 
 $proxies_show | Format-Table -AutoSize 
-Write-Host "Select a number (1-$($proxies_show.Count)): " -NoNewline -ForegroundColor Yellow
-$selected_index = Read-Host
+#Write-Host "Select a number (1-$($proxies_show.Count)): " -NoNewline -ForegroundColor Yellow
+$selected_index = Read-Host "Select a number (1-$($proxies_show.Count)) "
+$selected_index = [int]::Parse($selected_index)
+Write-Host ("=> {0} {1} {2}" -f $selected_index, ($selected_index -lt 1), ($selected_index -gt 15) )
 if ($selected_index -lt 1 -or $selected_index -gt $proxies_show.Count) {
     Write-Host "Invalid number." -ForegroundColor Red
     return
@@ -128,23 +130,19 @@ $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown") | Out-Null
 
 Write-Host "Prepare environment..." -ForegroundColor Green
 
-try{
-    New-Item -ItemType Directory -Path $scoop_root -Force | Out-Null
-    [Environment]::SetEnvironmentVariable("SCOOP", $scoop_root, "User")
-    $env::SCOOP = $scoop_root
 
-    New-Item -ItemType Directory -Path $scoop_global -Force | Out-Null
-    [Environment]::SetEnvironmentVariable("SCOOP_GLOBAL", $scoop_global, "User")
-    $env::SCOOP_GLOBAL = $scoop_global
+New-Item -ItemType Directory -Path $scoop_root -Force | Out-Null
+[Environment]::SetEnvironmentVariable("SCOOP", $scoop_root, "User")
+$env:SCOOP = $scoop_root
 
-    New-Item -ItemType Directory -Path $scoop_cache -Force | Out-Null
-    [Environment]::SetEnvironmentVariable("SCOOP_CACHE", $scoop_cache, "User")
-    $env::SCOOP_CACHE = $scoop_cache
-}
-catch{
-    Write-Host "Failed to create Scoop directory." -ForegroundColor Red
-    return 
-}
+New-Item -ItemType Directory -Path $scoop_global -Force | Out-Null
+[Environment]::SetEnvironmentVariable("SCOOP_GLOBAL", $scoop_global, "User")
+$env:SCOOP_GLOBAL = $scoop_global
+
+New-Item -ItemType Directory -Path $scoop_cache -Force | Out-Null
+[Environment]::SetEnvironmentVariable("SCOOP_CACHE", $scoop_cache, "User")
+$env:SCOOP_CACHE = $scoop_cache
+
 
 Write-Host ""
 Write-Host "3. Install Scoop, include git, 7z." -ForegroundColor Yellow
@@ -155,35 +153,69 @@ if (!$content) {
     return
 }
 
-$content = $content -replace "(https://github\.com/ScoopInstaller)", "$github_proxy/$1"
+$content = $content -replace "'(https://github\.com/ScoopInstaller/[^']*)'", "'$github_proxy/`$1'"
+#$content | Out-File "./scoop_install.ps1" 
+#Invoke-Expression "./scoop_install.ps1"
+
 Invoke-Expression $content
 
 $env:PATH += ";$scoop_root/shims"
 
+Write-Host ""
 Write-Host "Install git, 7z ..." -ForegroundColor Green
 
 Invoke-Expression "scoop config scoop_repo $github_proxy/https://github.com/ScoopInstaller/Scoop"
 Invoke-Expression "scoop config aria2-enabled false"
-Invoke-Expression "scoop update"
 
 # git proxy
 $git_json = "$scoop_root/buckets/main/bucket/git.json"
 if(Test-Path $git_json) {
-    $git_content = Get-Content $git_json -Raw
-    $git_content = $git_content -replace '"url":\s*"https:\/\/github\.com\/([^"]+)"', ('"url": "' + $github_proxy + '/https://github.com/$1"')
-    Set-Content $git_json -Value $git_content -Encoding UTF8
+    $content = Get-Content $git_json -Raw
+    $content = $content -replace '"url":\s*"https:\/\/github\.com\/([^"]+)"', ('"url": "' + $github_proxy + '/https://github.com/$1"')
+    Set-Content $git_json -Value $content -Encoding UTF8
 }else{
     Write-Host "Failed to find git.json." -ForegroundColor Red
 }
 
-Invoke-Expression "scoop install git 7z"
+$7zip_json = "$scoop_root/buckets/main/bucket/7zip.json"
+if(Test-Path $7zip_json) {
+    $content = Get-Content $7zip_json -Raw
+    $content = $content -replace 'https://www\.7-zip\.org/a/', 'https://mirrors.nju.edu.cn/7-zip/'
+    Set-Content $7zip_json -Value $content -Encoding UTF8
+}else{
+    Write-Host "Failed to find 7zip.json." -ForegroundColor Red
+}
+
+Invoke-Expression "scoop install git 7zip"
+
+# bucket add
+Invoke-Expression "scoop bucket rm main"
+Invoke-Expression "scoop bucket add main $github_proxy/https://github.com/ScoopInstaller/Main"
+Invoke-Expression "scoop bucket add extras $github_proxy/https://github.com/ScoopInstaller/Extras"
+Invoke-Expression "scoop bucket add nirsoft $github_proxy/https://github.com/ScoopInstaller/Nirsoft"
+Invoke-Expression "scoop bucket add versions $github_proxy/https://github.com/ScoopInstaller/Versions"
+Invoke-Expression "scoop bucket add nonportable $github_proxy/https://github.com/ScoopInstaller/Nonportable"
+
+Write-Host "Press any key to continue..." -ForegroundColor Yellow
+$host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown") | Out-Null
 
 Invoke-Expression "cls"
 Write-Host "4. Install Scoopex." -ForegroundColor Yellow
 Invoke-Expression "scoop bucket add bbdxf $github_proxy/$scoopex_url"
+# modify url
+$ex_json = "$scoop_root/buckets/bbdxf/bucket/scoopex.json"
+if(Test-Path $ex_json) {
+    $content = Get-Content $ex_json -Raw
+    $content = $content -replace '"(https://raw\.githubusercontent\.com/[^"]+)"', '"$github_proxy/$1"'
+    Set-Content $ex_json -Value $content -Encoding UTF8
+}else{
+    Write-Host "Failed to find scoopex.json." -ForegroundColor Red
+}
+
 Invoke-Expression "scoop install scoopex"
 Invoke-Expression "scoopex init"
 Invoke-Expression "scoop config mirror $github_proxy"
+Invoke-Expression "scoopex update"
 
 Write-Host "Scoopex Installed." -ForegroundColor Green
 Write-Host ""

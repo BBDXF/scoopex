@@ -609,6 +609,7 @@ if ($args.Count -eq 0) {
     Write-Host "  app-bucket <app> <bucket> => Set/get the app bucket. app can be *, means all. if bucket is not set, it will use online."
     Write-Host "  fix-bucket                => Math app with local bucket app list. if found, change app bucket to local bucket. otherwise, change app bucket to online."
     Write-Host "  mirr-bucket <bucket> <true/false/url> => Set/get the bucket git url. true will add mirror. false will remove mirror. url will set the mirror url."
+    Write-Host "  reset-bucket              => Fix local bucket git changes, make sure no error when update."
     Write-Host "  ..."
     Write-Host ""
     Write-Host "Beside above scoopex commands, it support call all scoop commands directly. You can use it replace scoop command." -ForegroundColor Blue
@@ -665,8 +666,8 @@ if($args[0] -eq 'init') {
     }
     # default config for scoop
     $null = set_config 'aria2-enabled' $false
-    $null = set_config 'autostash_on_conflict' $true
-    $null = set_config 'force_update' $true
+    #$null = set_config 'autostash_on_conflict' $true
+    #$null = set_config 'force_update' $true
     # $null = set_config 'use_sqlite_cache' $false
 
     # proxy: [username:password@]host:port
@@ -860,6 +861,21 @@ function Reset-BucketsChanges {
     }    
 }
 
+function Get-AppInLocalBucket{
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Name 
+    )
+    $dir = "$scoopdir/buckets/"
+    foreach($bucket_dir in (Get-ChildItem $dir)){
+        $app_json = $bucket_dir.FullName + "/bucket/$Name.json"
+		if(Test-Path $app_json){
+			return $bucket_dir.Name
+		}
+	}
+	return $null
+}
+
 # install/download/update
 if ($args[0] -eq 'install' -OR $args[0] -eq 'download') {
     if ( $args.Count -ne 2) {
@@ -878,8 +894,7 @@ if ($args[0] -eq 'install' -OR $args[0] -eq 'download') {
             $app_bucket_file = $appTmp.File
             $app_bucket = "online"
         }
-    }
-    else {
+    } else {
         # app name method
         $app = $app_url
         # bucket/app
@@ -892,43 +907,49 @@ if ($args[0] -eq 'install' -OR $args[0] -eq 'download') {
             $app_name = $app
             $app_bucket_file = ""
         }
-
-        # scoop app
-        $scoop_apps = Get-ScoopInstalledApps
-        # Write-Host "[scoopex] Scoop Apps: $scoop_apps"
-        if ($scoop_apps -contains $app_name) {
-            # bucket test
-            $install_file = (appsdir $false) + "/$app_name/current/install.json"
-            if (Test-Path $install_file) {
-                $install_json = Get-Content $install_file | ConvertFrom-Json
-                if ($install_json -and $install_json.bucket) {
-                    $app_bucket = $install_json.bucket
-                    $app_bucket_file = $scoopdir +"/buckets/$app_bucket/bucket/$app_name.json"
-                    Write-Host "[scoopex] Found App '$app_name' in Bucket '$app_bucket'" -ForegroundColor Green
-                    if($app_bucket -eq "online"){
-                        # online/xxx
-                        $online_app = Get-OnlineList $app_name
-                        if ($null -ne $online_app) {
-                            Write-Host "[scoopex] Update App '$app_name' from https://scoop.sh." -ForegroundColor Green
-                            $null = Get-LocalTmpBucketApp $online_app.Url $app_name
-                        }
-                    }
-                }
-            }
+        # found app in local bucket
+        $bucket_found = Get-AppInLocalBucket $app_name
+        if( $null -eq $bucket_found -OR $bucket_found -eq "" ){
+			# scoop app
+			$scoop_apps = Get-ScoopInstalledApps
+			# Write-Host "[scoopex] Scoop Apps: $scoop_apps"
+			if ($scoop_apps -contains $app_name) {
+				# bucket test
+				$install_file = (appsdir $false) + "/$app_name/current/install.json"
+				if (Test-Path $install_file) {
+					$install_json = Get-Content $install_file | ConvertFrom-Json
+					if ($install_json -and $install_json.bucket) {
+						$app_bucket = $install_json.bucket
+						$app_bucket_file = $scoopdir +"/buckets/$app_bucket/bucket/$app_name.json"
+						Write-Host "[scoopex] Found App '$app_name' in Bucket '$app_bucket'" -ForegroundColor Green
+						if($app_bucket -eq "online"){
+							# online/xxx
+							$online_app = Get-OnlineList $app_name
+							if ($null -ne $online_app) {
+								Write-Host "[scoopex] Update App '$app_name' from https://scoop.sh." -ForegroundColor Green
+								$null = Get-LocalTmpBucketApp $online_app.Url $app_name
+							}
+						}
+					}
+				}
+			}else{
+				# scoop.sh online search
+				$rlst = Select-OnlineScoopApp $app_name $app_bucket
+				# Write-Host "[scoopex] Online Search Result: $rlst"
+				if ($rlst) {
+					$rlst | Format-List | Out-Host
+					$url = $rlst.Repository + '/blob/master/' + $rlst.FilePath
+					$appTmp = Get-LocalTmpBucketApp $url $rlst.Name
+					if ($appTmp) {
+						$app_name = $appTmp.Name
+						$app_bucket_file = $appTmp.File
+						$app_bucket = "online"
+					}
+				}
+			}
         }else{
-            # scoop.sh online search
-            $rlst = Select-OnlineScoopApp $app_name $app_bucket
-            # Write-Host "[scoopex] Online Search Result: $rlst"
-            if ($rlst) {
-                $rlst | Format-List | Out-Host
-                $url = $rlst.Repository + '/blob/master/' + $rlst.FilePath
-                $appTmp = Get-LocalTmpBucketApp $url $rlst.Name
-                if ($appTmp) {
-                    $app_name = $appTmp.Name
-                    $app_bucket_file = $appTmp.File
-                    $app_bucket = "online"
-                }
-            }
+            $app_bucket = $bucket_found
+            $app_bucket_file = $scoopdir +"/buckets/$app_bucket/bucket/$app_name.json"
         }
         
     }
@@ -1186,6 +1207,12 @@ if ($args[0] -eq 'mirr-bucket') {
         }
     }
     exit 0
+}
+
+if($args[0] -eq "reset-bucket"){
+    Write-Host "[scoopex] Reset Buckets Changes." -ForegroundColor Yellow
+    Reset-BucketsChanges
+	exit 0
 }
 
 # default call scoop function
